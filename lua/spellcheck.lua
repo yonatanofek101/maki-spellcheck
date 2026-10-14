@@ -353,24 +353,59 @@ local function word_list_items()
   return items
 end
 
-local function prefill_add()
-  local st = maki.ui.input()
-  if not st or st.text ~= "" then
-    maki.ui.flash("spellcheck: type /spell add <word>")
+local function prompt_word()
+  local TextInput = require("maki.text_input")
+  local input = TextInput.new()
+  local buf = maki.ui.buf()
+  local win = maki.ui.open_win(buf, {
+    title = " Add word ",
+    width = 40,
+    height = 3,
+    footer = { { "Enter", "add" }, { "Esc", "cancel" } },
+  })
+  local function draw()
+    buf:set_lines(input:render("\u{276F} ").lines)
+  end
+  draw()
+  while true do
+    local ev = win:recv()
+    if not ev or ev.type == "close" then
+      return nil
+    end
+    if ev.type == "key" and ev.key == "<Esc>" then
+      win:close()
+      return nil
+    elseif ev.type == "key" and ev.key == "<CR>" then
+      win:close()
+      local word = input:value():match("^%s*(.-)%s*$")
+      return word ~= "" and word or nil
+    elseif ev.type == "paste" then
+      input:insert_text((ev.text:gsub("%s+", "")))
+      draw()
+    elseif ev.type == "key" and input:handle_key(ev.key) ~= TextInput.Result.IGNORED then
+      draw()
+    end
+  end
+end
+
+local function add_from_prompt()
+  local word = prompt_word()
+  if not word then
     return
   end
-  local ok = maki.ui.input_edit({ start = 0, stop = 0, text = "/spell add ", version = st.version, session_id = st.session_id })
-  if not ok then
-    maki.ui.flash("spellcheck: type /spell add <word>")
+  if word:find("%s") then
+    maki.ui.flash("spellcheck: add one word at a time")
+    return
   end
+  local ok, err = learn_word(word)
+  maki.ui.flash(ok and ("spellcheck: added %q"):format(word) or ("spellcheck: " .. tostring(err)))
 end
 
 local function open_word_list()
   local ListPicker = require("maki.list_picker")
   local items = word_list_items()
   if #items == 0 then
-    maki.ui.flash("spellcheck: your word list is empty")
-    prefill_add()
+    add_from_prompt()
     return
   end
   local last_cursor = 1
@@ -394,8 +429,8 @@ local function open_word_list()
     end
     last_cursor = event.index or last_cursor
     if event.type == "key" and event.key == "<C-a>" then
-      prefill_add()
-      return
+      add_from_prompt()
+      items = word_list_items()
     elseif event.type == "choice" then
       maki.ui.open_editor(words_path())
       items = word_list_items()
