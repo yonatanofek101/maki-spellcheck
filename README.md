@@ -9,8 +9,11 @@ system spell checker (`NSSpellChecker`). macOS only.
 - **`spell_check` tool** the agent can run on text or a file (docs, commit
   messages, UI strings). Code spans, fenced code, URLs, paths, emails and
   identifiers are skipped.
-- **`/spell <text>`** checks some text. **`/spell on`** / **`/spell off`**
-  toggles autocorrect.
+- **Remembers your words.** Undo a correction and the word is saved to your
+  word list, so it is never corrected again.
+- **`/spell <text>`** checks some text. **`/spell add <word>`** /
+  **`/spell remove <word>`** edit your word list. **`/spell on`** /
+  **`/spell off`** toggles autocorrect.
 
 ## Install
 
@@ -22,8 +25,9 @@ Requires Maki 0.6.3 or later.
    maki.pack.add({ "https://github.com/yonatanofek101/maki-spellcheck" })
    ```
 
-2. Restart Maki and approve the install and its permissions: `fs_read` (your
-   word list) and `run` (`osascript`, which talks to the macOS spell checker).
+2. Restart Maki and approve the install and its permissions: `fs_read` and
+   `fs_write` (your word list) and `run` (`osascript`, which talks to the
+   macOS spell checker).
 
 Update with `/packupdate maki-spellcheck`.
 
@@ -31,16 +35,18 @@ Update with `/packupdate maki-spellcheck`.
 
 - Only words the macOS autocorrect is confident about are replaced. Words with
   no clear fix are left alone.
-- Undo a wrong correction by deleting it and typing your word again. That word
-  is then left alone for the rest of the Maki session.
+- Undo a wrong correction (undo, or delete it and type your word again) and the
+  word is added to your word list for good.
 - Skipped: text inside backticks, slash commands, paths, URLs, camelCase,
   ACRONYMS, words with digits or underscores, and pasted text.
 
 ## Your own words
 
-List words that should never be flagged in `spell_words.txt` in your Maki config
-directory (normally `~/.config/maki/spell_words.txt`), one per line. Lines
-starting with `#` are ignored.
+Words that should never be flagged live in `spell_words.txt` in your Maki
+config directory (normally `~/.config/maki/spell_words.txt`), one per line.
+Lines starting with `#` are ignored. Words are added when you undo a
+correction or run `/spell add <word>`, and removed with `/spell remove <word>`.
+You can also edit the file by hand.
 
 ## Options
 

@@ -76,12 +76,16 @@ local function mask(text)
   return text
 end
 
+local function words_path()
+  return opts.words_file or maki.fs.joinpath(maki.env.config_dir(), "spell_words.txt")
+end
+
 local function load_ignored()
   local set = {}
   for _, w in ipairs(opts.ignore) do
     set[w:lower()] = true
   end
-  local content = maki.fs.read(opts.words_file or maki.fs.joinpath(maki.env.config_dir(), "spell_words.txt"))
+  local content = maki.fs.read(words_path())
   if content then
     for line in content:gmatch("[^\r\n]+") do
       local w = line:match("^%s*([^#%s][^%s]*)")
@@ -284,6 +288,68 @@ local last_fix = {}
 local own_edit = {}
 local rejected = {}
 
+local function learn_word(word)
+  local key = word:lower()
+  rejected[key] = true
+  if load_ignored()[key] then
+    return true
+  end
+  local path = words_path()
+  local existing = maki.fs.read(path) or ""
+  local sep = (existing ~= "" and not existing:find("\n$")) and "\n" or ""
+  local ok, err = maki.fs.append(path, sep .. word .. "\n")
+  if not ok then
+    return nil, err
+  end
+  return true
+end
+
+local function forget_word(word)
+  local key = word:lower()
+  rejected[key] = nil
+  local path = words_path()
+  local existing = maki.fs.read(path)
+  if not existing then
+    return false
+  end
+  local kept, removed = {}, false
+  for line in existing:gmatch("[^\n]*") do
+    local w = line:match("^%s*([^#%s][^%s]*)")
+    if w and w:lower() == key then
+      removed = true
+    elseif line ~= "" then
+      kept[#kept + 1] = line
+    end
+  end
+  if not removed then
+    return false
+  end
+  local ok, err = maki.fs.write(path, #kept > 0 and table.concat(kept, "\n") .. "\n" or "")
+  if not ok then
+    return nil, err
+  end
+  return true
+end
+
+local function learn_rejected(word)
+  maki.async.run(function()
+    local ok, err = learn_word(word)
+    if ok then
+      maki.ui.flash(("spellcheck: learned %q, won't correct it again"):format(word))
+    else
+      maki.log.warn("spellcheck: could not save word: " .. tostring(err))
+      maki.ui.flash(("spellcheck: kept %q for this session"):format(word))
+    end
+  end)
+end
+
+local function user_reverted(text, fix)
+  local stop = fix.start + #fix.from
+  return text:sub(fix.start, stop - 1) == fix.from
+    and not text:sub(stop, stop):find("[%a']")
+    and text:sub(fix.start, fix.start + #fix.to - 1) ~= fix.to
+end
+
 local function word_just_finished(text, cursor)
   local before = text:sub(1, cursor)
   if not before:find("[%s%.,;:!%?%)\"]$") then
@@ -305,12 +371,6 @@ end
 local function autocorrect_word(sid, word, start)
   local key = word:lower()
   if rejected[key] or load_ignored()[key] then
-    return
-  end
-  local lf = last_fix[sid]
-  if lf and lf.from == word and lf.start == start then
-    rejected[key] = true
-    maki.ui.flash(("spellcheck: kept %q"):format(word))
     return
   end
   maki.async.run(function()
@@ -336,7 +396,7 @@ local function autocorrect_word(sid, word, start)
       session_id = st.session_id,
     })
     if ok then
-      last_fix[sid] = { from = word, start = start }
+      last_fix[sid] = { from = word, to = fixed, start = start }
       maki.ui.flash(("spellcheck: %s → %s"):format(word, fixed))
     end
   end)
@@ -356,6 +416,12 @@ local function on_input_changed(ev)
   end
   if d.text == "" then
     last_fix[sid] = nil
+    return
+  end
+  local fix = last_fix[sid]
+  if fix and user_reverted(d.text, fix) then
+    last_fix[sid] = nil
+    learn_rejected(fix.from)
     return
   end
   if grew < 1 or grew > 2 then
@@ -412,7 +478,7 @@ local function register()
 
   maki.api.register_command({
     name = "/spell",
-    description = "Spell check text, or `/spell on|off` to toggle autocorrect as you type",
+    description = "Spell check text; `/spell add|remove <word>` edits your word list; `/spell on|off` toggles autocorrect",
     nargs = "*",
     handler = function(o)
       local arg = o.args:match("^%s*(.-)%s*$")
@@ -421,8 +487,25 @@ local function register()
         maki.ui.flash("spellcheck: autocorrect " .. arg)
         return
       end
+      local action, word = arg:match("^(%a+)%s+(%S+)$")
+      if action == "add" or action == "remove" then
+        maki.async.run(function()
+          if action == "add" then
+            local ok, err = learn_word(word)
+            maki.ui.flash(ok and ("spellcheck: added %q"):format(word) or ("spellcheck: " .. tostring(err)))
+          else
+            local ok, err = forget_word(word)
+            if ok == nil then
+              maki.ui.flash("spellcheck: " .. tostring(err))
+            else
+              maki.ui.flash(ok and ("spellcheck: removed %q"):format(word) or ("spellcheck: %q was not in your list"):format(word))
+            end
+          end
+        end)
+        return
+      end
       if not arg:find("%a") then
-        maki.ui.flash("usage: /spell <text>  |  /spell on|off (autocorrect is " .. (opts.autocorrect and "on" or "off") .. ")")
+        maki.ui.flash("usage: /spell <text> | /spell add|remove <word> | /spell on|off (autocorrect is " .. (opts.autocorrect and "on" or "off") .. ")")
         return
       end
       maki.async.run(function()
