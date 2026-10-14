@@ -11,6 +11,9 @@ system spell checker (`NSSpellChecker`). macOS only.
   identifiers are skipped.
 - **Remembers your words.** Undo a correction and the word is saved to your
   word list, so it is never corrected again.
+- **`/spell list`** (or just `/spell`) opens your word list: type to filter,
+  `Ctrl+D` twice to remove a word, `Ctrl+A` to add one, `Enter` to edit the
+  file.
 - **`/spell <text>`** checks some text. **`/spell add <word>`** /
   **`/spell remove <word>`** edit your word list. **`/spell on`** /
   **`/spell off`** toggles autocorrect.

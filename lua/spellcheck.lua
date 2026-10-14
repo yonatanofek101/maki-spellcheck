@@ -331,6 +331,93 @@ local function forget_word(word)
   return true
 end
 
+local function word_list_items()
+  local items, seen = {}, {}
+  local content = maki.fs.read(words_path()) or ""
+  for line in content:gmatch("[^\r\n]+") do
+    local w = line:match("^%s*([^#%s][^%s]*)")
+    if w and not seen[w:lower()] then
+      seen[w:lower()] = true
+      items[#items + 1] = { label = w, word = w }
+    end
+  end
+  for _, w in ipairs(opts.ignore) do
+    if not seen[w:lower()] then
+      seen[w:lower()] = true
+      items[#items + 1] = { label = w, word = w, detail = "from init.lua", fixed = true }
+    end
+  end
+  table.sort(items, function(a, b)
+    return a.word:lower() < b.word:lower()
+  end)
+  return items
+end
+
+local function prefill_add()
+  local st = maki.ui.input()
+  if not st or st.text ~= "" then
+    maki.ui.flash("spellcheck: type /spell add <word>")
+    return
+  end
+  local ok = maki.ui.input_edit({ start = 0, stop = 0, text = "/spell add ", version = st.version, session_id = st.session_id })
+  if not ok then
+    maki.ui.flash("spellcheck: type /spell add <word>")
+  end
+end
+
+local function open_word_list()
+  local ListPicker = require("maki.list_picker")
+  local items = word_list_items()
+  if #items == 0 then
+    maki.ui.flash("spellcheck: your word list is empty")
+    prefill_add()
+    return
+  end
+  local last_cursor = 1
+  while true do
+    local event = ListPicker.open(items, {
+      title = (" Spell Words (%d) "):format(#items),
+      cursor = last_cursor,
+      key = function(item)
+        return item.word
+      end,
+      action_keys = { "<C-a>" },
+      footer = {
+        { "Enter", "edit file" },
+        { "Ctrl+A", "add" },
+        { "Ctrl+D", "remove" },
+        { "Esc", "close" },
+      },
+    })
+    if event.type == "close" then
+      return
+    end
+    last_cursor = event.index or last_cursor
+    if event.type == "key" and event.key == "<C-a>" then
+      prefill_add()
+      return
+    elseif event.type == "choice" then
+      maki.ui.open_editor(words_path())
+      items = word_list_items()
+    elseif event.type == "delete" then
+      if event.item.fixed then
+        maki.ui.flash(("spellcheck: %q is set in init.lua, remove it there"):format(event.item.word))
+      else
+        local ok, err = forget_word(event.item.word)
+        maki.ui.flash(ok and ("spellcheck: removed %q"):format(event.item.word) or ("spellcheck: " .. tostring(err)))
+        items = word_list_items()
+      end
+    else
+      return
+    end
+    if #items == 0 then
+      maki.ui.flash("spellcheck: your word list is empty")
+      return
+    end
+    last_cursor = math.min(last_cursor, #items)
+  end
+end
+
 local function learn_rejected(word)
   maki.async.run(function()
     local ok, err = learn_word(word)
@@ -478,13 +565,17 @@ local function register()
 
   maki.api.register_command({
     name = "/spell",
-    description = "Spell check text; `/spell add|remove <word>` edits your word list; `/spell on|off` toggles autocorrect",
+    description = "Spell check text; `/spell list` shows your word list; `/spell add|remove <word>`; `/spell on|off` toggles autocorrect",
     nargs = "*",
     handler = function(o)
       local arg = o.args:match("^%s*(.-)%s*$")
       if arg == "on" or arg == "off" then
         opts.autocorrect = arg == "on"
         maki.ui.flash("spellcheck: autocorrect " .. arg)
+        return
+      end
+      if arg == "list" or arg == "" then
+        open_word_list()
         return
       end
       local action, word = arg:match("^(%a+)%s+(%S+)$")
@@ -505,7 +596,7 @@ local function register()
         return
       end
       if not arg:find("%a") then
-        maki.ui.flash("usage: /spell <text> | /spell add|remove <word> | /spell on|off (autocorrect is " .. (opts.autocorrect and "on" or "off") .. ")")
+        maki.ui.flash("usage: /spell <text> | /spell list | /spell add|remove <word> | /spell on|off (autocorrect is " .. (opts.autocorrect and "on" or "off") .. ")")
         return
       end
       maki.async.run(function()
