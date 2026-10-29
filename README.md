@@ -30,8 +30,9 @@ Requires Maki 0.6.3 or later.
    ```
 
 2. Restart Maki and approve the install and its permissions: `fs_read` and
-   `fs_write` (your word list) and `run` (`osascript`, which talks to the
-   macOS spell checker).
+   `fs_write` (your word list), `run` (`osascript`, which talks to the
+   macOS spell checker), and `input`, `session_read`, `session_write` and
+   `agent` (reading the chat input and fixing typos in it).
 
 Update with `/packupdate maki-spellcheck`.
 

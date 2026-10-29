@@ -526,7 +526,7 @@ end
 
 local function on_input_changed(ev)
   local d = ev.data
-  if not d or d.cursor_only then
+  if not d or d.cursor_only or not d.text then
     return
   end
   local sid = d.session_id
