@@ -74,6 +74,7 @@ maki.pack.add({ "https://github.com/yonatanofek101/maki-spellcheck" }, {
 | --- | --- | --- |
 | `autocorrect` | `true` | Correct words as you type |
 | `underline` | `true` | Underline typos in the chat input |
+| `underline_color` | `"1"` | Typo color: an ANSI palette index (`"1"` is red) or `"#rrggbb"` |
 | `backspace_undo` | `true` | Backspace right after a correction undoes it |
 | `language` | `"en"` | macOS spell checker language |
 | `max_suggestions` | `5` | Suggestions per typo for the tool and `/spell` |

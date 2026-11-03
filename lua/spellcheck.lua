@@ -54,6 +54,7 @@ local opts = {
   words_file = nil,
   autocorrect = true,
   underline = true,
+  underline_color = "1",
   backspace_undo = true,
   check_key = false,
   fix_key = false,
@@ -529,8 +530,7 @@ local underline_timer
 local scanning, rescan = false, false
 
 local function underline_style()
-  local diff_old = maki.ui.theme_style("diff_old") or {}
-  return { underline = true, fg = diff_old.fg }
+  return { underline = true, fg = opts.underline_color }
 end
 
 local function scan_once()
