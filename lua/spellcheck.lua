@@ -53,6 +53,8 @@ local opts = {
   ignore = {},
   words_file = nil,
   autocorrect = true,
+  underline = true,
+  backspace_undo = true,
   check_key = false,
   fix_key = false,
 }
@@ -212,22 +214,18 @@ local function short_summary(issues)
   return ("%d typo%s: %s"):format(#issues, #issues == 1 and "" or "s", table.concat(parts, ", "))
 end
 
-local function apply_fixes(text, issues, cursor)
-  local pieces, last, new_cursor, fixed = {}, 1, cursor, 0
+local function fix_edits(issues, cursor)
+  local edits, new_cursor = {}, cursor
   for _, it in ipairs(issues) do
     local repl = it.suggestions[1]
     if repl then
-      pieces[#pieces + 1] = text:sub(last, it.start)
-      pieces[#pieces + 1] = repl
-      last = it.stop + 1
-      fixed = fixed + 1
+      edits[#edits + 1] = { start = it.start, stop = it.stop, text = repl }
       if it.stop <= cursor then
         new_cursor = new_cursor + #repl - (it.stop - it.start)
       end
     end
   end
-  pieces[#pieces + 1] = text:sub(last)
-  return table.concat(pieces), new_cursor, fixed
+  return edits, new_cursor
 end
 
 local function with_input(fn)
@@ -262,24 +260,22 @@ local function fix_input()
       maki.ui.flash("spellcheck: no typos")
       return
     end
-    local new_text, new_cursor, fixed = apply_fixes(st.text, issues, st.cursor)
-    if fixed == 0 then
+    local edits, new_cursor = fix_edits(issues, st.cursor)
+    if #edits == 0 then
       maki.ui.flash(short_summary(issues) .. " (nothing to auto-fix)")
       return
     end
-    local ok, err = maki.ui.input_edit({
-      start = 0,
-      stop = #st.text,
-      text = new_text,
+    local done, err = maki.ui.input_edit({
+      edits = edits,
       cursor = new_cursor,
       version = st.version,
       session_id = st.session_id,
     })
-    if not ok then
+    if not done then
       maki.notify("spellcheck: input changed, try again (" .. tostring(err) .. ")", "warn")
       return
     end
-    maki.ui.flash(("spellcheck: fixed %d of %d"):format(fixed, #issues))
+    maki.ui.flash(("spellcheck: fixed %d of %d"):format(#edits, #issues))
   end)
 end
 
@@ -509,7 +505,7 @@ local function autocorrect_word(sid, word, start)
     end
     local stop = start - 1 + #word
     own_edit[sid] = st.text:sub(1, start - 1) .. fixed .. st.text:sub(stop + 1)
-    local ok = maki.ui.input_edit({
+    local done = maki.ui.input_edit({
       start = start - 1,
       stop = stop,
       text = fixed,
@@ -517,18 +513,96 @@ local function autocorrect_word(sid, word, start)
       version = st.version,
       session_id = st.session_id,
     })
-    if ok then
-      last_fix[sid] = { from = word, to = fixed, start = start }
+    if done then
+      last_fix[sid] = { from = word, to = fixed, start = start, version = done.version, cursor = done.cursor }
       maki.ui.flash(("spellcheck: %s → %s"):format(word, fixed))
+    else
+      own_edit[sid] = nil
     end
   end)
 end
 
-local function on_input_changed(ev)
-  local d = ev.data
-  if not d or d.cursor_only or not d.text then
+local UNDERLINE_NS = "typos"
+local UNDERLINE_MAX_BYTES = 20000
+local UNDERLINE_DELAY_MS = 300
+local underline_timer
+local scanning, rescan = false, false
+
+local function underline_style()
+  local diff_old = maki.ui.theme_style("diff_old") or {}
+  return { underline = true, fg = diff_old.fg }
+end
+
+local function scan_once()
+  local st = maki.ui.input()
+  if not st then
     return
   end
+  local marks = {}
+  if opts.underline and #st.text <= UNDERLINE_MAX_BYTES and st.text:find("%a") then
+    local style = underline_style()
+    for _, it in ipairs(M.check(st.text) or {}) do
+      local typing_it = st.cursor >= it.start and st.cursor <= it.stop
+      if not typing_it then
+        marks[#marks + 1] = { start = it.start, stop = it.stop, hl = style }
+      end
+    end
+  end
+  maki.ui.input_decorate({ ns = UNDERLINE_NS, marks = marks, version = st.version, session_id = st.session_id })
+end
+
+local function refresh_underlines()
+  if scanning then
+    rescan = true
+    return
+  end
+  scanning = true
+  maki.async.run(function()
+    repeat
+      rescan = false
+      local ok, err = pcall(scan_once)
+      if not ok then
+        maki.log.warn("spellcheck underline: " .. tostring(err))
+      end
+    until not rescan
+    scanning = false
+  end)
+end
+
+local function schedule_underlines()
+  if underline_timer then
+    underline_timer:stop()
+  end
+  underline_timer = maki.defer_fn(refresh_underlines, UNDERLINE_DELAY_MS)
+end
+
+local function backspace_undo(ev)
+  local st = ev.input
+  local fix = st and last_fix[st.session_id]
+  if not fix or st.anchor or st.version ~= fix.version or st.cursor ~= fix.cursor then
+    return ev.fallback()
+  end
+  local sid = st.session_id
+  local s0 = fix.start - 1
+  own_edit[sid] = st.text:sub(1, s0) .. fix.from .. st.text:sub(s0 + #fix.to + 1)
+  local done = maki.ui.input_edit({
+    start = s0,
+    stop = s0 + #fix.to,
+    text = fix.from,
+    cursor = st.cursor + #fix.from - #fix.to,
+    version = st.version,
+    session_id = sid,
+  })
+  if not done then
+    own_edit[sid] = nil
+    return ev.fallback()
+  end
+  last_fix[sid] = nil
+  learn_rejected(fix.from)
+end
+
+local function on_input_changed(ev)
+  local d = ev.data
   local sid = d.session_id
   local grew = #d.text - (prev_len[sid] or 0)
   prev_len[sid] = #d.text
@@ -647,6 +721,13 @@ local function register()
 
   maki.api.create_autocmd("InputChanged", {
     callback = function(ev)
+      local d = ev.data
+      if not d or d.cursor_only or not d.text then
+        return
+      end
+      if opts.underline then
+        schedule_underlines()
+      end
       if opts.autocorrect then
         on_input_changed(ev)
       end
@@ -665,10 +746,15 @@ function M.setup(user_opts)
     register()
   end
   if opts.check_key then
-    maki.keymap.set("n", opts.check_key, check_input, { desc = "Spell check chat input" })
+    maki.keymap.set({ "n", "i" }, opts.check_key, check_input, { desc = "Spell check chat input" })
   end
   if opts.fix_key then
-    maki.keymap.set("n", opts.fix_key, fix_input, { desc = "Fix typos in chat input" })
+    maki.keymap.set({ "n", "i" }, opts.fix_key, fix_input, { desc = "Fix typos in chat input" })
+  end
+  if opts.backspace_undo then
+    maki.keymap.set("i", "<BS>", backspace_undo, { desc = "Undo the spellcheck correction just made" })
+  else
+    pcall(maki.keymap.del, "i", "<BS>")
   end
 end
 

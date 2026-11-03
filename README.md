@@ -5,7 +5,9 @@ system spell checker (`NSSpellChecker`). macOS only.
 
 - **Autocorrect as you type** in the chat input. When you finish a word, a
   confident typo is replaced (`teh` becomes `the`) and the status bar shows
-  what changed.
+  what changed. Press **Backspace** right after a correction to undo it.
+- **Typos underlined** in the chat input, for words autocorrect has no
+  confident fix for.
 - **`spell_check` tool** the agent can run on text or a file (docs, commit
   messages, UI strings). Code spans, fenced code, URLs, paths, emails and
   identifiers are skipped.
@@ -13,15 +15,14 @@ system spell checker (`NSSpellChecker`). macOS only.
   word list, so it is never corrected again.
 - **`/spell list`** (or just `/spell`) opens your word list: type to filter,
   `Ctrl+D` twice to remove a word, `Ctrl+A` to add one in a small box,
-  `Enter` to edit the
-  file.
+  `Enter` to edit the file.
 - **`/spell <text>`** checks some text. **`/spell add <word>`** /
   **`/spell remove <word>`** edit your word list. **`/spell on`** /
   **`/spell off`** toggles autocorrect.
 
 ## Install
 
-Requires Maki 0.6.3 or later.
+Requires Maki 0.7.0 or later.
 
 1. Add this line to `~/.config/maki/init.lua`:
 
@@ -40,8 +41,9 @@ Update with `/packupdate maki-spellcheck`.
 
 - Only words the macOS autocorrect is confident about are replaced. Words with
   no clear fix are left alone.
-- Undo a wrong correction (undo, or delete it and type your word again) and the
-  word is added to your word list for good.
+- Undo a wrong correction and the word is added to your word list for good.
+  Backspace right after the correction, maki's undo, or deleting it and typing
+  your word again all count.
 - Skipped: text inside backticks, slash commands, paths, URLs, camelCase,
   ACRONYMS, words with digits or underscores, and pasted text.
 
@@ -71,6 +73,8 @@ maki.pack.add({ "https://github.com/yonatanofek101/maki-spellcheck" }, {
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `autocorrect` | `true` | Correct words as you type |
+| `underline` | `true` | Underline typos in the chat input |
+| `backspace_undo` | `true` | Backspace right after a correction undoes it |
 | `language` | `"en"` | macOS spell checker language |
 | `max_suggestions` | `5` | Suggestions per typo for the tool and `/spell` |
 | `ignore` | `{}` | Extra words to accept |
